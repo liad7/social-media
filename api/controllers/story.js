@@ -1,61 +1,110 @@
-import { db } from "../connect.js";
 import jwt from "jsonwebtoken";
+import { ObjectId } from "mongodb";
 import moment from "moment";
+import dbService from "../connect";
 
-export const getStories = (req, res) => {
-  const token = req.cookies.accessToken;
-  if (!token) return res.status(401).json("Not logged in!");
+export const getStories = async (req, res) => {
+  try {
+    const token = req.cookies.accessToken;
+    if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
-    if (err) return res.status(403).json("Token is not valid!");
+    jwt.verify(token, "secretkey", async (err, userInfo) => {
+      if (err) return res.status(403).json("Token is not valid!");
 
-    console.log(userId);
+      const collection = await dbService.getCollection("story");
 
-    const q = `SELECT s.*, name FROM stories AS s JOIN users AS u ON (u.id = s.userId)
-    LEFT JOIN relationships AS r ON (s.userId = r.followedUserId AND r.followerUserId= ?) LIMIT 4`;
+      const query = [
+        {
+          $lookup: {
+            from: "users",
+            localField: "userId",
+            foreignField: "id",
+            as: "user",
+          },
+        },
+        {
+          $unwind: "$user",
+        },
+        {
+          $lookup: {
+            from: "relationships",
+            let: { userId: "$userId" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$followedUserId", "$$userId"] },
+                      { $eq: ["$followerUserId", userInfo.id] },
+                    ],
+                  },
+                },
+              },
+            ],
+            as: "relationship",
+          },
+        },
+        {
+          $limit: 4,
+        },
+      ];
 
-    db.query(q, [userInfo.id], (err, data) => {
-      if (err) return res.status(500).json(err);
-      return res.status(200).json(data);
+      const stories = await collection.aggregate(query).toArray();
+
+      return res.status(200).json(stories);
     });
-  });
+  } catch (error) {
+    return res.status(500).json(error);
+  }
 };
 
-export const addStory = (req, res) => {
+export const addStory = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "INSERT INTO stories(`img`, `createdAt`, `userId`) VALUES (?)";
-    const values = [
-      req.body.img,
-      moment(Date.now()).format("YYYY-MM-DD HH:mm:ss"),
-      userInfo.id,
-    ];
+    try {
+      const collection = await dbService.getCollection("story");
 
-    db.query(q, [values], (err, data) => {
-      if (err) return res.status(500).json(err);
+      const story = {
+        img: req.body.img,
+        createdAt: moment(Date.now()).format("YYYY-MM-DD HH:mm:ss"),
+        userId: userInfo.id,
+      };
+
+      await collection.insertOne(story);
+
       return res.status(200).json("Story has been created.");
-    });
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };
 
-export const deleteStory = (req, res) => {
+export const deleteStory = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "DELETE FROM stories WHERE `id`=? AND `userId` = ?";
+    try {
+      const collection = await dbService.getCollection("story");
 
-    db.query(q, [req.params.id, userInfo.id], (err, data) => {
-      if (err) return res.status(500).json(err);
-      if (data.affectedRows > 0)
+      const result = await collection.deleteOne({
+        _id: ObjectId(req.params.id),
+        userId: userInfo.id,
+      });
+
+      if (result.deletedCount > 0) {
         return res.status(200).json("Story has been deleted.");
-      return res.status(403).json("You can delete only your story!");
-    });
+      } else {
+        return res.status(403).json("You can delete only your story!");
+      }
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };

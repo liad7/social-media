@@ -1,48 +1,66 @@
-import { db } from "../connect.js";
 import jwt from "jsonwebtoken";
+import dbService from "../connect";
 
-export const getLikes = (req,res)=>{
-    const q = "SELECT userId FROM likes WHERE postId = ?";
+export const getLikes = async (req, res) => {
+  try {
+    const collection = await dbService.getCollection("like");
+    const likes = await collection
+      .find({ postId: req.query.postId })
+      .project({ userId: 1, _id: 0 })
+      .toArray();
 
-    db.query(q, [req.query.postId], (err, data) => {
-      if (err) return res.status(500).json(err);
-      return res.status(200).json(data.map(like=>like.userId));
-    });
-}
+    return res.status(200).json(likes.map((like) => like.userId));
+  } catch (error) {
+    return res.status(500).json(error);
+  }
+};
 
-export const addLike = (req, res) => {
+export const addLike = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "INSERT INTO likes (`userId`,`postId`) VALUES (?)";
-    const values = [
-      userInfo.id,
-      req.body.postId
-    ];
+    try {
+      const collection = await dbService.getCollection("like");
 
-    db.query(q, [values], (err, data) => {
-      if (err) return res.status(500).json(err);
+      const like = {
+        userId: userInfo.id,
+        postId: req.body.postId,
+      };
+
+      await collection.insertOne(like);
+
       return res.status(200).json("Post has been liked.");
-    });
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };
 
-export const deleteLike = (req, res) => {
-
+export const deleteLike = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "DELETE FROM likes WHERE `userId` = ? AND `postId` = ?";
+    try {
+      const collection = await dbService.getCollection("like");
 
-    db.query(q, [userInfo.id, req.query.postId], (err, data) => {
-      if (err) return res.status(500).json(err);
-      return res.status(200).json("Post has been disliked.");
-    });
+      const result = await collection.deleteOne({
+        userId: userInfo.id,
+        postId: req.query.postId,
+      });
+
+      if (result.deletedCount > 0) {
+        return res.status(200).json("Post has been disliked.");
+      } else {
+        return res.status(404).json("Like not found.");
+      }
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };

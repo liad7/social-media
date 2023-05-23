@@ -1,48 +1,70 @@
-import { db } from "../connect.js";
 import jwt from "jsonwebtoken";
+import dbService from "../connect";
 
-export const getRelationships = (req,res)=>{
-    const q = "SELECT followerUserId FROM relationships WHERE followedUserId = ?";
+export const getRelationships = async (req, res) => {
+  try {
+    const collection = await dbService.getCollection("relationship");
 
-    db.query(q, [req.query.followedUserId], (err, data) => {
-      if (err) return res.status(500).json(err);
-      return res.status(200).json(data.map(relationship=>relationship.followerUserId));
-    });
-}
+    const relationships = await collection
+      .find({ followedUserId: req.query.followedUserId })
+      .toArray();
 
-export const addRelationship = (req, res) => {
+    const followerUserIds = relationships.map(
+      (relationship) => relationship.followerUserId
+    );
+
+    return res.status(200).json(followerUserIds);
+  } catch (error) {
+    return res.status(500).json(error);
+  }
+};
+
+export const addRelationship = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "INSERT INTO relationships (`followerUserId`,`followedUserId`) VALUES (?)";
-    const values = [
-      userInfo.id,
-      req.body.userId
-    ];
+    try {
+      const collection = await dbService.getCollection("relationship");
 
-    db.query(q, [values], (err, data) => {
-      if (err) return res.status(500).json(err);
+      const relationship = {
+        followerUserId: userInfo.id,
+        followedUserId: req.body.userId,
+      };
+
+      await collection.insertOne(relationship);
+
       return res.status(200).json("Following");
-    });
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };
 
-export const deleteRelationship = (req, res) => {
-
+export const deleteRelationship = async (req, res) => {
   const token = req.cookies.accessToken;
   if (!token) return res.status(401).json("Not logged in!");
 
-  jwt.verify(token, "secretkey", (err, userInfo) => {
+  jwt.verify(token, "secretkey", async (err, userInfo) => {
     if (err) return res.status(403).json("Token is not valid!");
 
-    const q = "DELETE FROM relationships WHERE `followerUserId` = ? AND `followedUserId` = ?";
+    try {
+      const collection = await dbService.getCollection("relationship");
 
-    db.query(q, [userInfo.id, req.query.userId], (err, data) => {
-      if (err) return res.status(500).json(err);
-      return res.status(200).json("Unfollow");
-    });
+      const result = await collection.deleteOne({
+        followerUserId: userInfo.id,
+        followedUserId: req.query.userId,
+      });
+
+      if (result.deletedCount > 0) {
+        return res.status(200).json("Unfollow");
+      } else {
+        return res.status(500).json("Unable to unfollow.");
+      }
+    } catch (error) {
+      return res.status(500).json(error);
+    }
   });
 };
